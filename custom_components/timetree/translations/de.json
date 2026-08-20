@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TimeTree Zugangsdaten",
+        "data": {
+          "email": "E-Mail",
+          "password": "Passwort"
+        }
+      },
+      "calendar": {
+        "title": "Kalender auswählen",
+        "data": {
+          "calendar_id": "TimeTree-Kalender",
+          "scan_interval": "Abfrageintervall (Minuten)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Anmeldung fehlgeschlagen. E-Mail/Passwort prüfen.",
+      "unknown": "Unerwarteter Fehler."
+    },
+    "abort": {
+      "no_calendars_found": "Keine Kalender im TimeTree-Konto gefunden.",
+      "already_configured": "Dieser Kalender ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Abfrageintervall (Minuten)"
+        }
+      }
+    }
+  }
+}

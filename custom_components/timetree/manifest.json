@@ -1,0 +1,15 @@
+{
+  "domain": "timetree",
+  "name": "TimeTree Calendar",
+  "codeowners": ["@luxvita"],
+  "config_flow": true,
+  "documentation": "https://github.com/luxvita/timetree-ha-fork",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/luxvita/timetree-ha-fork/issues",
+  "requirements": [
+    "curl_cffi>=0.7.0",
+    "icalendar>=5.0.0",
+    "recurring-ical-events>=2.1.0"
+  ],
+  "version": "2.0.0"
+}

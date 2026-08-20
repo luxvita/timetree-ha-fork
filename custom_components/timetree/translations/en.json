@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TimeTree Credentials",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "calendar": {
+        "title": "Select Calendar",
+        "data": {
+          "calendar_id": "TimeTree Calendar",
+          "scan_interval": "Poll interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Login failed. Check email/password.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "no_calendars_found": "No calendars found in this TimeTree account.",
+      "already_configured": "This calendar is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "scan_interval": "Poll interval (minutes)"
+        }
+      }
+    }
+  }
+}
