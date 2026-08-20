@@ -28,6 +28,8 @@
   "options": {
     "step": {
       "init": {
+        "title": "TimeTree Options",
+        "description": "TimeTree does not report label names for this account via the API - enter them here yourself, matching what you see in the TimeTree app's own label/colour settings. Colours (compare against the TimeTree app to know which field is which):\n\n{label_colors}",
         "data": {
           "scan_interval": "Poll interval (minutes)"
         }

@@ -43,6 +43,7 @@ class TimeTreeCoordinator(DataUpdateCoordinator):
         self.api = api
         self.calendar_id = calendar_id
         self.calendar_alias = calendar_alias
+        self.entry = entry
         self.last_update_success_time = None
         self.labels = {}  # label_id -> {"name": ..., "color": ...}
 
@@ -53,6 +54,17 @@ class TimeTreeCoordinator(DataUpdateCoordinator):
             self.labels = await self.api.async_get_labels(self.calendar_id)
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Error communicating with TimeTree API: {err}") from err
+
+        # TimeTree's /labels endpoint has been observed to return an empty
+        # "name" for every label on some accounts (the app appears to
+        # resolve display names through a different, not-yet-understood
+        # mechanism). Rather than guess, let the user supply the names
+        # themselves once via the integration's options - see
+        # config_flow.py's options flow.
+        for label_id, info in self.labels.items():
+            override_name = self.entry.options.get(f"label_name_{label_id}")
+            if override_name:
+                info["name"] = override_name
 
         try:
             parsed_events = await self.hass.async_add_executor_job(

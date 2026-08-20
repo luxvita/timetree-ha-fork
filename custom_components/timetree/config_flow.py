@@ -157,19 +157,48 @@ class TimeTreeOptionsFlowHandler(config_entries.OptionsFlow):
             self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
         )
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_SCAN_INTERVAL, default=current_interval
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=MIN_SCAN_INTERVAL,
-                        max=MAX_SCAN_INTERVAL,
-                        step=1,
-                        mode=selector.NumberSelectorMode.SLIDER,
-                    )
+        schema_dict = {
+            vol.Required(
+                CONF_SCAN_INTERVAL, default=current_interval
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_SCAN_INTERVAL,
+                    max=MAX_SCAN_INTERVAL,
+                    step=1,
+                    mode=selector.NumberSelectorMode.SLIDER,
                 )
-            }
-        )
+            )
+        }
 
-        return self.async_show_form(step_id="init", data_schema=schema)
+        # TimeTree's /labels endpoint has been observed to return an empty
+        # "name" for every label on some accounts - let the user type the
+        # real names here (visible in the TimeTree app's own label/colour
+        # settings) instead of guessing. One text field per known label,
+        # pre-filled with any previously saved override.
+        description_placeholders = {}
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id)
+        labels = coordinator.labels if coordinator else {}
+
+        if labels:
+            color_lines = []
+            for label_id in sorted(labels):
+                color = labels[label_id].get("color") or "?"
+                field_key = f"label_name_{label_id}"
+                current_value = self._config_entry.options.get(field_key, "")
+                schema_dict[vol.Optional(field_key, default=current_value)] = (
+                    selector.TextSelector()
+                )
+                color_lines.append(f"ID {label_id} = {color}")
+            description_placeholders["label_colors"] = "\n".join(color_lines)
+        else:
+            description_placeholders["label_colors"] = (
+                "(labels not loaded yet - save once, then reopen this dialog)"
+            )
+
+        schema = vol.Schema(schema_dict)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+            description_placeholders=description_placeholders,
+        )
