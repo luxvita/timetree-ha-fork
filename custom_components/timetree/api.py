@@ -178,6 +178,8 @@ class TimeTreeApi:
             _LOGGER.warning("Could not fetch labels for calendar %s: %s", calendar_id, e)
             return {}
 
+        _LOGGER.debug("Raw labels response for calendar %s: %s", calendar_id, r_json)
+
         labels = {}
         for label in r_json.get("calendar_labels", []):
             label_id = label.get("id")
@@ -186,8 +188,33 @@ class TimeTreeApi:
             color = label.get("color")
             if isinstance(color, int):
                 color = f"#{color:06x}"
+
+            # TimeTree's API has been observed to return the label name
+            # under different keys/shapes depending on account/API version -
+            # a flat "name" string is the common case (per timetree-exporter
+            # and prior testing), but some responses instead nest it (e.g.
+            # under a localized "names" object, or under "title"). Try the
+            # common variants defensively rather than assuming one shape.
+            name = label.get("name")
+            if not name:
+                name = label.get("title")
+            if not name:
+                names_obj = label.get("names")
+                if isinstance(names_obj, dict):
+                    name = (
+                        names_obj.get("de")
+                        or names_obj.get("en")
+                        or next(iter(names_obj.values()), None)
+                    )
+            if not name:
+                _LOGGER.debug(
+                    "Label %s has no discoverable name field, raw data: %s",
+                    label_id,
+                    label,
+                )
+
             labels[label_id] = {
-                "name": label.get("name", ""),
+                "name": name or "",
                 "color": color,
             }
         return labels
