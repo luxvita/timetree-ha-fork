@@ -100,6 +100,48 @@ on both the write and read side.
   payload correctness and off-by-one symmetry — a live test against a
   real TimeTree account is still pending.
 
+## Post-v2.0.0 fixes (live-testing feedback)
+
+After installing v2.0.0, live testing against a real TimeTree account
+surfaced three more things:
+
+### Per-event colors now supported (via one entity per label)
+
+v2.0.0 only exposed label colour as an `extra_state_attributes` value -
+useless for actually *seeing* different colours in a dashboard. Home
+Assistant's `CalendarEvent` has no per-event colour field at all, and
+neither the native iOS calendar app nor common Lovelace calendar cards
+(including Calendar Card Pro) render one - colour is always a property of
+the *calendar entity*, never of an individual event.
+
+**Fix:** the integration now creates **one calendar entity per TimeTree
+label** (e.g. `calendar.familienkalender_anne`,
+`calendar.familienkalender_chris`), plus an "Unlabeled" bucket, *in
+addition to* the original combined entity (which keeps its original
+`unique_id`, so existing dashboards/automations keep working unchanged).
+Each label entity exposes that label's TimeTree colour as its `color`
+attribute - copy that value into your Lovelace calendar card's per-entity
+colour setting to get TimeTree-equivalent colours. This is a one-time
+manual step (HA has no mechanism to read entity attributes into card
+styling automatically), but stays correct afterwards since TimeTree label
+colours rarely change.
+
+### Minimum poll interval lowered from 5 to 1 minute
+
+The original 5-minute floor was an arbitrary carry-over from the initial
+implementation, not a TimeTree API constraint.
+
+### Editing/deleting events is intentionally not supported
+
+Unlike `create_event` (backed by the extensively verified issue #5
+patch), no equivalent research exists for TimeTree's update/delete
+endpoints. Guessing at that payload risks silently corrupting or
+duplicating data rather than failing loudly, so this was intentionally
+left out. **Edit or delete events in the TimeTree app** - since the
+calendar is polled fresh every cycle, changes made there show up in Home
+Assistant automatically (as fast as your configured poll interval, now as
+low as 1 minute).
+
 ## Installation
 
 ### Via HACS (Custom Repository)

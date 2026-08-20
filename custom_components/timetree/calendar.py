@@ -8,6 +8,20 @@ Write side: async_create_event implements the fixes from GitHub issues #3
 and #5 (correct kwargs, correct endpoint/payload, CSRF + TLS fingerprint,
 correct all-day date handling) - see api.py's module docstring for detail
 on each defect.
+
+Per-label entities: Home Assistant's CalendarEvent has no per-event colour
+field, and neither the native iOS calendar app nor common Lovelace
+calendar cards (incl. Calendar Card Pro) render one - colour is always a
+property of the *calendar entity*, never of an individual event (the same
+constraint applies to CalDAV/iOS, see project notes). Since TimeTree's own
+per-event colour is itself just its label's colour (confirmed against
+timetree-exporter's source), the only way to get TimeTree-equivalent
+colours in Home Assistant is one calendar entity per label - exactly the
+same "one calendar per person" pattern used for the Nextcloud/CalDAV
+migration. This module therefore sets up one entity per known label (plus
+one "unlabeled" bucket) *in addition to* the original combined entity, so
+existing dashboards/automations referencing the combined entity keep
+working unchanged.
 """
 from datetime import date, datetime
 import logging
@@ -22,16 +36,50 @@ from .coordinator import TimeTreeCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# Sentinel used as this entity's label filter to mean "show every event,
+# regardless of label" (the original, combined entity).
+_ALL_LABELS = object()
+# Sentinel used to mean "only events with no label assigned".
+_NO_LABEL = object()
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up the calendar entry."""
+    """Set up the calendar entities: one combined + one per TimeTree label."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    entity = TimeTreeCalendarEntity(
-        coordinator,
-        entry.data[CONF_CALENDAR_NAME],
-        entry.data[CONF_CALENDAR_ALIAS],
+    calendar_name = entry.data[CONF_CALENDAR_NAME]
+    calendar_alias = entry.data[CONF_CALENDAR_ALIAS]
+
+    entities = [
+        TimeTreeCalendarEntity(
+            coordinator,
+            calendar_name,
+            calendar_alias,
+            label_filter=_ALL_LABELS,
+            supports_create=True,
+        )
+    ]
+
+    for label_id, info in coordinator.labels.items():
+        label_name = info.get("name") or f"Label {label_id}"
+        entities.append(
+            TimeTreeCalendarEntity(
+                coordinator,
+                f"{calendar_name} - {label_name}",
+                calendar_alias,
+                label_filter=label_id,
+            )
+        )
+
+    entities.append(
+        TimeTreeCalendarEntity(
+            coordinator,
+            f"{calendar_name} - Unlabeled",
+            calendar_alias,
+            label_filter=_NO_LABEL,
+        )
     )
-    async_add_entities([entity])
+
+    async_add_entities(entities)
 
 
 def _as_comparable_datetime(value):
@@ -46,16 +94,46 @@ def _as_comparable_datetime(value):
 
 
 class TimeTreeCalendarEntity(CalendarEntity):
-    """Representation of a TimeTree calendar."""
+    """Representation of a TimeTree calendar (optionally filtered by label)."""
 
     _attr_has_entity_name = True
-    _attr_supported_features = CalendarEntityFeature.CREATE_EVENT
 
-    def __init__(self, coordinator: TimeTreeCoordinator, name: str, calendar_alias: str):
+    def __init__(
+        self,
+        coordinator: TimeTreeCoordinator,
+        name: str,
+        calendar_alias: str,
+        label_filter=_ALL_LABELS,
+        supports_create: bool = False,
+    ):
         self.coordinator = coordinator
         self._attr_name = name
         self._calendar_alias = calendar_alias
-        self._attr_unique_id = f"{DOMAIN}_{coordinator.calendar_id}"
+        self._label_filter = label_filter
+
+        if label_filter is _ALL_LABELS:
+            # Keep the exact same unique_id as before the per-label split,
+            # so existing installs don't lose their entity's history/id.
+            self._attr_unique_id = f"{DOMAIN}_{coordinator.calendar_id}"
+        elif label_filter is _NO_LABEL:
+            self._attr_unique_id = f"{DOMAIN}_{coordinator.calendar_id}_unlabeled"
+        else:
+            self._attr_unique_id = f"{DOMAIN}_{coordinator.calendar_id}_label_{label_filter}"
+
+        if supports_create:
+            self._attr_supported_features = CalendarEntityFeature.CREATE_EVENT
+
+    # ------------------------------------------------------------------ #
+    # Filtering
+    # ------------------------------------------------------------------ #
+
+    def _matching_events(self):
+        events = self.coordinator.data or []
+        if self._label_filter is _ALL_LABELS:
+            return events
+        if self._label_filter is _NO_LABEL:
+            return [e for e in events if e.get("label_id") is None]
+        return [e for e in events if e.get("label_id") == self._label_filter]
 
     # ------------------------------------------------------------------ #
     # Read
@@ -63,11 +141,11 @@ class TimeTreeCalendarEntity(CalendarEntity):
 
     @property
     def event(self):
-        """Return the next upcoming event."""
+        """Return the next upcoming event (within this entity's label filter)."""
         now = dt_util.now()
-        events = self.coordinator.data or []
-
-        upcoming = [e for e in events if _as_comparable_datetime(e["end"]) > now]
+        upcoming = [
+            e for e in self._matching_events() if _as_comparable_datetime(e["end"]) > now
+        ]
         if not upcoming:
             return None
 
@@ -75,12 +153,12 @@ class TimeTreeCalendarEntity(CalendarEntity):
         return self._build_calendar_event(next_event)
 
     async def async_get_events(self, hass, start_date, end_date):
-        """Return calendar events within a range."""
+        """Return calendar events within a range (within this entity's label filter)."""
         if self.coordinator.data is None:
             await self.coordinator.async_request_refresh()
 
         events = []
-        for event_data in self.coordinator.data or []:
+        for event_data in self._matching_events():
             ev_start = _as_comparable_datetime(event_data["start"])
             ev_end = _as_comparable_datetime(event_data["end"])
 
@@ -91,38 +169,30 @@ class TimeTreeCalendarEntity(CalendarEntity):
 
     @property
     def extra_state_attributes(self):
-        """Expose TimeTree label info for the *next* event (GitHub issue #4).
+        """Expose this entity's TimeTree label colour/name (GitHub issue #4).
 
-        HA's CalendarEvent dataclass only serialises its own declared
-        fields (summary/start/end/location/description/uid) via
-        `as_dict()` - anything else attached to it is silently dropped and
-        never reaches the frontend or `calendar.get_events`. Per-event
-        colour also isn't rendered by the native iOS calendar app or common
-        Lovelace calendar cards (incl. Calendar Card Pro) regardless.
-        `extra_state_attributes` is the correct, idiomatic place to expose
-        this kind of extra metadata on a HA entity: it shows up in
-        Developer Tools > States and via `state_attr()` in templates, so a
-        custom card/automation can still make use of it.
-
-        Also lists all known labels for the calendar for reference.
+        Copy this "color" value into your Lovelace calendar card's
+        per-entity colour setting to get TimeTree-equivalent colours - HA
+        has no mechanism to apply this automatically, since calendar
+        colouring is a card-configuration concern, not an entity-state
+        concern (see module docstring).
         """
-        attrs = {
-            "available_labels": {
-                str(lid): {"name": info.get("name"), "color": info.get("color")}
-                for lid, info in self.coordinator.labels.items()
+        if self._label_filter is _ALL_LABELS:
+            return {
+                "available_labels": {
+                    str(lid): {"name": info.get("name"), "color": info.get("color")}
+                    for lid, info in self.coordinator.labels.items()
+                }
             }
+        if self._label_filter is _NO_LABEL:
+            return {"label_name": "Unlabeled", "color": None}
+
+        info = self.coordinator.labels.get(self._label_filter, {})
+        return {
+            "label_id": self._label_filter,
+            "label_name": info.get("name"),
+            "color": info.get("color"),
         }
-
-        events = self.coordinator.data or []
-        now = dt_util.now()
-        upcoming = [e for e in events if _as_comparable_datetime(e["end"]) > now]
-        if upcoming:
-            next_event = min(upcoming, key=lambda e: _as_comparable_datetime(e["start"]))
-            attrs["next_event_label_id"] = next_event.get("label_id")
-            attrs["next_event_label_name"] = next_event.get("label_name")
-            attrs["next_event_label_color"] = next_event.get("label_color")
-
-        return attrs
 
     def _build_calendar_event(self, event_data):
         return CalendarEvent(
@@ -135,7 +205,7 @@ class TimeTreeCalendarEntity(CalendarEntity):
         )
 
     # ------------------------------------------------------------------ #
-    # Write
+    # Write (only enabled on the combined _ALL_LABELS entity)
     # ------------------------------------------------------------------ #
 
     async def async_create_event(self, **kwargs):
@@ -146,6 +216,11 @@ class TimeTreeCalendarEntity(CalendarEntity):
         events, date for all-day) before calling this method - NOT
         "start_date_time"/"start_date" as the original integration
         assumed (GitHub issue #3).
+
+        Note: editing or deleting existing events is not supported here -
+        do that in the TimeTree app; changes are picked up on the next
+        poll (or immediately after a create_event call, since that
+        triggers an immediate refresh).
         """
         summary = kwargs.get("summary", "New Event")
         description = kwargs.get("description", "")

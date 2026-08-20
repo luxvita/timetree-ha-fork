@@ -8,7 +8,7 @@ CONF_CALENDAR_ALIAS = "calendar_alias"
 CONF_SCAN_INTERVAL = "scan_interval"
 
 DEFAULT_SCAN_INTERVAL = 15  # minutes
-MIN_SCAN_INTERVAL = 5
+MIN_SCAN_INTERVAL = 1
 MAX_SCAN_INTERVAL = 120
 
 # How far into the past / future occurrences of recurring events
